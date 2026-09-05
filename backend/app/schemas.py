@@ -27,6 +27,17 @@ class QuoteOut(BaseModel):
         from_attributes = True
 
 
+class TransactionOut(BaseModel):
+    type: str
+    amount: float
+    status: str
+    razorpay_ref: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class OrderOut(BaseModel):
     id: int
     origin_pincode: str
@@ -40,6 +51,7 @@ class OrderOut(BaseModel):
     retry_count: int
     created_at: datetime
     quotes: list[QuoteOut] = []
+    transactions: list[TransactionOut] = []
 
     class Config:
         from_attributes = True
