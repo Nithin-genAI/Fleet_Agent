@@ -5,7 +5,3 @@ backend/fleetagent.db
 venv/
 node_modules/
 frontend/dist/
-
-
-
-
