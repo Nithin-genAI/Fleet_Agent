@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+backend/fleetagent.db
+.env
+venv/
+node_modules/
+frontend/dist/
