@@ -32,6 +32,9 @@ export default function OrderTimeline({ order, onUpdated }) {
           {order.quotes.map((q, i) => (
             <li key={i} className={q.fleet_name === order.selected_fleet ? "chosen" : ""}>
               <strong>{q.fleet_name}</strong> — ₹{q.price} · ETA {q.eta_hours}h
+              <span className={`cat cat-${q.category || "standard"}`}>
+                {(q.category === "quick") ? "same-day" : "long-haul"}
+              </span>
               {q.fleet_name === order.selected_fleet && <span className="tag">selected</span>}
             </li>
           ))}
