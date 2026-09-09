@@ -3,3 +3,6 @@ uvicorn[standard]
 sqlalchemy
 pydantic
 groq
+playwright
+razorpay
+python-dotenv
