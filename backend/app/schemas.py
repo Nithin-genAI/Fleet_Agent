@@ -15,6 +15,13 @@ class OrderCreate(BaseModel):
     destination_pincode: str
     weight_kg: float
     package_value: float
+    # Quick Fleets (optional): intra-city same-day. Only sent when the user fills
+    # the Quick Fleets section of the order form. Long-haul quotes always come
+    # from the pincodes above; quick-commerce quotes come from these.
+    pickup_area: Optional[str] = None
+    pickup_city: Optional[str] = None
+    drop_area: Optional[str] = None
+    drop_city: Optional[str] = None
 
 
 class QuoteOut(BaseModel):
@@ -22,6 +29,7 @@ class QuoteOut(BaseModel):
     price: float
     eta_hours: Optional[float] = None
     source: str
+    category: str = "standard"  # "standard" (long-haul) | "quick" (intra-city same-day)
 
     class Config:
         from_attributes = True
@@ -44,6 +52,10 @@ class OrderOut(BaseModel):
     destination_pincode: str
     weight_kg: float
     package_value: float
+    pickup_area: Optional[str] = None
+    pickup_city: Optional[str] = None
+    drop_area: Optional[str] = None
+    drop_city: Optional[str] = None
     status: str
     selected_fleet: Optional[str] = None
     selected_price: Optional[float] = None

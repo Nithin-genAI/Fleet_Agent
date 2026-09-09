@@ -28,6 +28,12 @@ class Order(Base):
     destination_pincode = Column(String, nullable=False)
     weight_kg = Column(Float, nullable=False)
     package_value = Column(Float, nullable=False)
+    # Quick Fleets (optional intra-city same-day inputs). Nullable because
+    # long-haul-only orders don't fill them.
+    pickup_area = Column(String, nullable=True)
+    pickup_city = Column(String, nullable=True)
+    drop_area = Column(String, nullable=True)
+    drop_city = Column(String, nullable=True)
 
     status = Column(String, default="created", nullable=False)
     selected_fleet = Column(String, nullable=True)
@@ -54,7 +60,8 @@ class Quote(Base):
     fleet_name = Column(String, nullable=False)
     price = Column(Float, nullable=False)
     eta_hours = Column(Float, nullable=True)
-    source = Column(String, nullable=False)  # "porter" | "wareiq" | "mock"
+    source = Column(String, nullable=False)  # "wareiq" | "nimbuspost" | "borzo" | "porter" | "mock"
+    category = Column(String, default="standard", nullable=False)  # "standard" | "quick"
     fetched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     order = relationship("Order", back_populates="quotes")

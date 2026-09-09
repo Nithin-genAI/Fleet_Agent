@@ -22,21 +22,41 @@ def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
         destination_pincode=payload.destination_pincode,
         weight_kg=payload.weight_kg,
         package_value=payload.package_value,
+        pickup_area=payload.pickup_area,
+        pickup_city=payload.pickup_city,
+        drop_area=payload.drop_area,
+        drop_city=payload.drop_city,
         status="created",
     )
     db.add(order)
     db.commit()
     db.refresh(order)
 
-    # 1. fetch quotes
-    quotes = quote_tool.get_all_quotes(order.origin_pincode, order.destination_pincode, order.weight_kg)
+    # 1. fetch quotes. Quick-commerce quotes are only fetched when the user
+    # supplied a pickup_city (the Quick Fleets section); otherwise long-haul only.
+    quick = None
+    if order.pickup_city:
+        quick = {
+            "pickup_area": order.pickup_area,
+            "pickup_city": order.pickup_city,
+            "drop_area": order.drop_area,
+            "drop_city": order.drop_city,
+        }
+    quotes = quote_tool.get_all_quotes(
+        order.origin_pincode, order.destination_pincode, order.weight_kg, quick=quick
+    )
     for q in quotes:
         db.add(models.Quote(order_id=order.id, **q))
     order.status = "quoted"
     db.commit()
 
-    # 2. agent selects a fleet
-    decision = agent_orchestrator.select_fleet(quotes, order.package_value)
+    # 2. agent selects a fleet. "quick" fleets are intra-city only, so they're
+    # valid candidates only when the user filled the same pickup and drop city.
+    intra_city = bool(
+        order.pickup_city and order.drop_city
+        and order.pickup_city.strip().lower() == order.drop_city.strip().lower()
+    )
+    decision = agent_orchestrator.select_fleet(quotes, order.package_value, intra_city=intra_city)
     order.selected_fleet = decision["fleet_name"]
     order.selected_price = decision["price"]
     order.agent_reasoning = decision["reasoning"]
