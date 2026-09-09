@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { sendDeliveryEvent } from "../api";
+import { openCheckout, checkoutAvailable, TEST_CARD_HINT } from "../checkout";
 
 const STATUS_LABELS = {
   created: "Created",
@@ -10,6 +12,7 @@ const STATUS_LABELS = {
 };
 
 export default function OrderTimeline({ order, onUpdated }) {
+  const [payMsg, setPayMsg] = useState(null);
   if (!order) return <p className="empty">Create an order to see the agent work.</p>;
 
   async function fire(outcome) {
@@ -17,7 +20,21 @@ export default function OrderTimeline({ order, onUpdated }) {
     onUpdated(updated);
   }
 
+  async function collectPayment() {
+    setPayMsg(null);
+    const result = await openCheckout(order);
+    if (result.status === "captured") {
+      onUpdated(result.order);
+      setPayMsg("Payment captured — refunds will now be real.");
+    } else if (result.status === "payment_failed" || result.status === "capture_failed") {
+      setPayMsg(result.error || "Payment failed");
+    } else if (result.status === "dismissed") {
+      setPayMsg("Checkout closed without paying.");
+    }
+  }
+
   const canSimulate = order.status === "booked";
+  const needsPayment = canSimulate && !order.razorpay_payment_id && checkoutAvailable(order);
 
   return (
     <div className="timeline">
@@ -25,6 +42,9 @@ export default function OrderTimeline({ order, onUpdated }) {
       <p className="status-badge" data-status={order.status}>
         {STATUS_LABELS[order.status] || order.status}
       </p>
+      {order.razorpay_payment_id && (
+        <p className="tag">payment captured · {order.razorpay_payment_id}</p>
+      )}
 
       <section>
         <h3>1. Quotes fetched</h3>
@@ -58,9 +78,27 @@ export default function OrderTimeline({ order, onUpdated }) {
         </ul>
       </section>
 
+      {needsPayment && (
+        <section>
+          <h3>4. Collect payment</h3>
+          <p className="quick-hint">No payment captured yet — complete a test checkout so an RTO refund is real. {TEST_CARD_HINT}.</p>
+          <div className="sim-buttons">
+            <button className="delivered" onClick={collectPayment}>Open Razorpay Checkout</button>
+          </div>
+          {payMsg && <p className="quick-hint">{payMsg}</p>}
+        </section>
+      )}
+
       {canSimulate && (
         <section>
-          <h3>4. Simulate delivery outcome</h3>
+          <h3>{needsPayment ? "5" : "4"}. Simulate delivery outcome</h3>
+          {!order.razorpay_payment_id && (
+            <p className="quick-hint">
+              {checkoutAvailable(order)
+                ? "No payment captured — an RTO here will fall back to a mock refund."
+                : "Hold is mocked (no Razorpay keys) — refunds will mock."}
+            </p>
+          )}
           <div className="sim-buttons">
             <button className="delivered" onClick={() => fire("delivered")}>Simulate Delivered</button>
             <button className="rto" onClick={() => fire("rto")}>Simulate RTO</button>

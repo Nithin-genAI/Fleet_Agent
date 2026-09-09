@@ -33,3 +33,22 @@ export async function sendDeliveryEvent(id, outcome) {
   if (!res.ok) throw new Error("Failed to send delivery event");
   return res.json();
 }
+
+// Public key_id only — safe to ship to the browser for Checkout.js.
+export async function getRazorpayKey() {
+  const res = await fetch(`${BASE_URL}/payments/razorpay-key`);
+  if (!res.ok) throw new Error("Failed to fetch Razorpay key");
+  return res.json();
+}
+
+// Hand the Checkout.js success payload to the backend, which verifies the
+// signature and stores the payment_id on the order. Returns the updated order.
+export async function capturePayment(orderId, { razorpay_order_id, razorpay_payment_id, razorpay_signature }) {
+  const res = await fetch(`${BASE_URL}/payments/${orderId}/capture`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ razorpay_order_id, razorpay_payment_id, razorpay_signature }),
+  });
+  if (!res.ok) throw new Error("Failed to capture payment");
+  return res.json();
+}

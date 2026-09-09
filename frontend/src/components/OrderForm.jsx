@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createOrder } from "../api";
+import { openCheckout, checkoutAvailable, TEST_CARD_HINT } from "../checkout";
 
 const DEFAULTS = {
   origin_pincode: "560001",
@@ -42,7 +43,16 @@ export default function OrderForm({ onCreated }) {
         delete payload.drop_city;
       }
       const order = await createOrder(payload);
-      onCreated(order);
+      // If a real Razorpay order was created, collect payment now so refunds
+      // can be real later. If checkout isn't available (mock/no keys), just
+      // hand the order straight to the timeline as before.
+      if (checkoutAvailable(order)) {
+        const result = await openCheckout(order);
+        if (result.status === "captured") onCreated(result.order);
+        else onCreated(order); // dismissed/failed — order is still booked, just unpaid
+      } else {
+        onCreated(order);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -101,6 +111,7 @@ export default function OrderForm({ onCreated }) {
       <button type="submit" disabled={loading}>
         {loading ? "Dispatching agent…" : "Create Order"}
       </button>
+      <p className="quick-hint">On submit, the agent fetches quotes, picks a fleet, and opens Razorpay test checkout ({TEST_CARD_HINT}).</p>
       {error && <p className="error">{error}</p>}
     </form>
   );
