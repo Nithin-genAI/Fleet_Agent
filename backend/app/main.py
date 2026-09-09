@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()  # must run before anything reads os.environ (Groq/Razorpay clients read lazily, but this is the standard place)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

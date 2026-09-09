@@ -46,13 +46,20 @@ def delivery_event(order_id: int, event: schemas.DeliveryEvent, db: Session = De
             db.refresh(order)
             return order
 
-        # reroute: pick the next-best fleet from the SAME quotes we already fetched
+        # reroute: pick the next-best fleet from the SAME quotes we already fetched.
+        # Keep category so the rule fallback can still exclude intra-city quick fleets
+        # from an inter-city route.
         existing_quotes = [
-            {"fleet_name": q.fleet_name, "price": q.price, "eta_hours": q.eta_hours}
+            {"fleet_name": q.fleet_name, "price": q.price, "eta_hours": q.eta_hours, "category": q.category}
             for q in order.quotes
         ]
+        intra_city = bool(
+            order.pickup_city and order.drop_city
+            and order.pickup_city.strip().lower() == order.drop_city.strip().lower()
+        )
         decision = agent_orchestrator.reroute_after_rto(
-            existing_quotes, failed_fleet=order.selected_fleet, package_value=order.package_value
+            existing_quotes, failed_fleet=order.selected_fleet,
+            package_value=order.package_value, intra_city=intra_city,
         )
         order.selected_fleet = decision["fleet_name"]
         order.selected_price = decision["price"]
