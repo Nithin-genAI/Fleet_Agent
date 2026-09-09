@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import Base, engine
-from .routers import orders, delivery
+from .routers import orders, delivery, payments
 
 Base.metadata.create_all(bind=engine)  # creates fleetagent.db + tables on first run
 
@@ -20,6 +20,7 @@ app.add_middleware(
 
 app.include_router(orders.router)
 app.include_router(delivery.router)
+app.include_router(payments.router)
 
 
 @app.get("/health")

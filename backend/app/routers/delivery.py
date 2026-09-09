@@ -36,7 +36,9 @@ def delivery_event(order_id: int, event: schemas.DeliveryEvent, db: Session = De
         return order
 
     if event.outcome == "rto":
-        refund = payment_tool.refund_payment(order.id, order.selected_price)
+        # If the customer completed Checkout, we have a real payment_id and this
+        # fires a genuine Razorpay refund. Otherwise it mocks — see payment_tool.
+        refund = payment_tool.refund_payment(order.id, order.selected_price, order.razorpay_payment_id)
         db.add(models.Transaction(order_id=order.id, type="refund", amount=order.selected_price,
                                    razorpay_ref=refund["razorpay_ref"], status=refund["status"]))
 

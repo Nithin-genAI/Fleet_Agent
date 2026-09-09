@@ -8,11 +8,18 @@ allowed to change this field. If you find yourself setting order.status
 from inside a router, that's a bug: routers call services, services own
 state transitions.
 
-    created -> quoted -> fleet_selected -> payment_held -> booked
+    created -> quoted -> fleet_selected -> booked
+        -> (razorpay checkout: customer pays, payment_id captured onto the order)
         -> delivered -> payment_released -> completed
                 or
-        -> rto -> refunded -> rerouted -> booked (retry, capped at 1)
+        -> rto -> refunded (real, using the captured payment_id) -> rerouted
+                -> booked (retry, capped at 1)
                 or -> failed (if reroute also fails)
+
+The Razorpay ORDER container is created at booking (payment_tool.create_hold).
+The actual PAYMENT only exists once a customer completes Razorpay Checkout and
+we capture the returned payment_id onto Order.razorpay_payment_id. Until then
+refunds mock; after, refund_payment does a real refund against that payment_id.
 """
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
@@ -40,6 +47,9 @@ class Order(Base):
     selected_price = Column(Float, nullable=True)
     agent_reasoning = Column(String, nullable=True)
     retry_count = Column(Integer, default=0)
+    # Set only once a customer completes Razorpay Checkout for this order's
+    # hold. Null until then, which is why refunds mock in a no-checkout demo.
+    razorpay_payment_id = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(

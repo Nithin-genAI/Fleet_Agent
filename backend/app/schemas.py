@@ -61,6 +61,7 @@ class OrderOut(BaseModel):
     selected_price: Optional[float] = None
     agent_reasoning: Optional[str] = None
     retry_count: int
+    razorpay_payment_id: Optional[str] = None
     created_at: datetime
     quotes: list[QuoteOut] = []
     transactions: list[TransactionOut] = []
@@ -71,3 +72,11 @@ class OrderOut(BaseModel):
 
 class DeliveryEvent(BaseModel):
     outcome: str  # "delivered" | "rto"
+
+
+class PaymentCapture(BaseModel):
+    """Payload Razorpay Checkout.js hands back on a successful payment.
+    The signature is verified server-side before we trust the payment_id."""
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
