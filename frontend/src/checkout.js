@@ -8,7 +8,11 @@
 //   { status: "unavailable" }       — no real Razorpay order / no key -> skip checkout
 import { getRazorpayKey, capturePayment } from "./api";
 
-const TEST_CARD_HINT = "Test card: 4111 1111 1111 1111 · any future expiry · any CVV";
+// Test-mode only (rzp_test_ keys) — no real money ever moves.
+// UPI is the most reliable path (no card-method settings to enable); the
+// domestic card works too once international cards aren't blocked in the
+// Razorpay dashboard.
+const TEST_CARD_HINT = "Test mode only · UPI: success@razorpay · or card 4111 1111 1111 1111 (any future expiry / any CVV)";
 
 function holdRef(order) {
   const hold = order.transactions?.find((t) => t.type === "hold");

@@ -91,3 +91,32 @@ section h3 { margin-bottom: 8px; font-size: 0.95rem; color: var(--muted); }
 .sim-buttons .rto { background: var(--danger); }
 
 .empty { color: var(--muted); }
+
+/* Payout confirmation banner — shown when delivery is completed and payment is released */
+.payout-confirmation {
+  background: #dff2ea;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.payout-confirmation h3 { margin: 0 0 8px; color: var(--accent); font-size: 1.05rem; }
+.payout-ref { font-size: 0.85rem; color: var(--muted); margin: 6px 0; }
+.payout-ref code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 0.82rem; }
+.payout-note { font-size: 0.82rem; color: var(--accent); margin: 8px 0 0; font-style: italic; }
+.mock-badge { color: var(--danger); font-weight: 600; }
+
+/* RTO failure banner */
+.rto-failed-banner {
+  background: #f7e2dc;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.rto-failed-banner h3 { margin: 0 0 8px; color: var(--danger); font-size: 1.05rem; }
+
+/* Webhook info section */
+.webhook-info { border-top: 1px dashed var(--border); padding-top: 12px; }
+.webhook-info h3 { font-size: 0.88rem; color: var(--muted); }
+.webhook-info code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 0.82rem; }

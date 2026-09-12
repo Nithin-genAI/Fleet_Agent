@@ -35,6 +35,10 @@ export default function OrderTimeline({ order, onUpdated }) {
 
   const canSimulate = order.status === "booked";
   const needsPayment = canSimulate && !order.razorpay_payment_id && checkoutAvailable(order);
+  const isCompleted = order.status === "completed";
+  const releaseTxn = order.transactions?.find((t) => t.type === "release");
+  const isMockPayout = releaseTxn && releaseTxn.razorpay_ref?.startsWith("mock_");
+  const webhookPayload = '{"order_id": ' + order.id + ', "status": "delivered"}';
 
   return (
     <div className="timeline">
@@ -44,6 +48,29 @@ export default function OrderTimeline({ order, onUpdated }) {
       </p>
       {order.razorpay_payment_id && (
         <p className="tag">payment captured · {order.razorpay_payment_id}</p>
+      )}
+
+      {/* Payment released confirmation banner */}
+      {isCompleted && releaseTxn && (
+        <div className="payout-confirmation">
+          <h3>✓ Payment Released to Fleet</h3>
+          <p>
+            <strong>{order.selected_fleet}</strong> has been paid <strong>₹{releaseTxn.amount}</strong>
+          </p>
+          <p className="payout-ref">
+            Payout ref: <code>{releaseTxn.razorpay_ref}</code> · Status: {releaseTxn.status}
+            {isMockPayout && <span className="mock-badge"> (simulated — RazorpayX not configured)</span>}
+          </p>
+          <p className="payout-note">The autonomous loop is complete: order delivered → payment released to fleet.</p>
+        </div>
+      )}
+
+      {/* RTO failure banner */}
+      {order.status === "failed" && (
+        <div className="rto-failed-banner">
+          <h3>✗ Delivery Failed</h3>
+          <p>RTO recovery exhausted (retry limit reached). Refund has been processed.</p>
+        </div>
       )}
 
       <section>
@@ -103,6 +130,19 @@ export default function OrderTimeline({ order, onUpdated }) {
             <button className="delivered" onClick={() => fire("delivered")}>Simulate Delivered</button>
             <button className="rto" onClick={() => fire("rto")}>Simulate RTO</button>
           </div>
+        </section>
+      )}
+
+      {/* Webhook info for autonomous mode */}
+      {canSimulate && (
+        <section className="webhook-info">
+          <h3>Or trigger via webhook (autonomous mode)</h3>
+          <p className="quick-hint">
+            Courier: <code>POST /webhooks/courier</code> — body: <code>{webhookPayload}</code>
+          </p>
+          <p className="quick-hint">
+            Razorpay: <code>POST /webhooks/razorpay</code> — for payment/payout lifecycle events
+          </p>
         </section>
       )}
     </div>
