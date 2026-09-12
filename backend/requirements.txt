@@ -6,3 +6,4 @@ groq
 playwright
 razorpay
 python-dotenv
+alembic

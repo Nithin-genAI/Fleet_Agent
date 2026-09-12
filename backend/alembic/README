@@ -1,0 +1,11 @@
+Alembic migration directory.
+
+To create a new migration after changing models.py:
+  cd backend
+  alembic revision --autogenerate -m "description of change"
+
+To apply migrations:
+  alembic upgrade head
+
+To rollback one migration:
+  alembic downgrade -1
