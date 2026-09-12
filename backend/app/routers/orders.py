@@ -12,11 +12,17 @@ from ..database import get_db
 from .. import models, schemas
 from ..services import quote_tool, agent_orchestrator, payment_tool
 
+import time
+import logging
+
+logger = logging.getLogger("fleetagent.orders")
+
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
 @router.post("/", response_model=schemas.OrderOut)
 def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
+    t0 = time.time()
     order = models.Order(
         origin_pincode=payload.origin_pincode,
         destination_pincode=payload.destination_pincode,
@@ -31,6 +37,8 @@ def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
     db.add(order)
     db.commit()
     db.refresh(order)
+
+    t_order = time.time()
 
     # 1. fetch quotes. Quick-commerce quotes are only fetched when the user
     # supplied a pickup_city (the Quick Fleets section); otherwise long-haul only.
@@ -49,6 +57,7 @@ def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
         db.add(models.Quote(order_id=order.id, **q))
     order.status = "quoted"
     db.commit()
+    t_quotes = time.time()
 
     # 2. agent selects a fleet. "quick" fleets are intra-city only, so they're
     # valid candidates only when the user filled the same pickup and drop city.
@@ -62,6 +71,7 @@ def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
     order.agent_reasoning = decision["reasoning"]
     order.status = "fleet_selected"
     db.commit()
+    t_select = time.time()
 
     # 3. hold payment
     hold = payment_tool.create_hold(order.id, order.selected_price)
@@ -70,6 +80,16 @@ def create_order(payload: schemas.OrderCreate, db: Session = Depends(get_db)):
     order.status = "booked"
     db.commit()
     db.refresh(order)
+    t_hold = time.time()
+
+    logger.info(
+        "Order #%d created in %.1fs | quotes: %.1fs | fleet_select: %.1fs | hold: %.1fs",
+        order.id,
+        t_hold - t0,
+        t_quotes - t_order,
+        t_select - t_quotes,
+        t_hold - t_select,
+    )
     return order
 
 
