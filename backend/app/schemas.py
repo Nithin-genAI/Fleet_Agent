@@ -80,3 +80,12 @@ class PaymentCapture(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: str
     razorpay_signature: str
+
+
+class CourierWebhookPayload(BaseModel):
+    """Payload a courier integration sends on delivery status change.
+    Stands in for real Delhivery/NimbusPost webhooks."""
+    order_id: int
+    status: str  # "delivered" | "rto" | "picked_up"
+    tracking_id: Optional[str] = None
+    fleet_name: Optional[str] = None

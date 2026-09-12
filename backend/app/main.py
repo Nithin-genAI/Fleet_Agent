@@ -5,9 +5,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import Base, engine
-from .routers import orders, delivery, payments
 
-Base.metadata.create_all(bind=engine)  # creates fleetagent.db + tables on first run
+from .routers import orders, delivery, payments, webhooks
+
+# Schema is managed by Alembic migrations — run `alembic upgrade head` to create
+# tables. This create_all is a safety net for dev: if no migration has been run
+# yet (e.g. fresh clone without alembic), it creates the tables so the app
+# still starts. In production, use Alembic exclusively.
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="FleetAgent")
 
@@ -21,6 +26,7 @@ app.add_middleware(
 app.include_router(orders.router)
 app.include_router(delivery.router)
 app.include_router(payments.router)
+app.include_router(webhooks.router)
 
 
 @app.get("/health")

@@ -28,6 +28,7 @@ plainly in the README.
 import os
 import uuid
 import razorpay
+import json
 
 
 def _get_client():
@@ -65,7 +66,15 @@ def create_hold(order_id: int, amount: float) -> dict:
 def verify_payment(razorpay_order_id: str, razorpay_payment_id: str, razorpay_signature: str) -> bool:
     """Verify the Checkout.js success signature server-side (HMAC-SHA256 of
     order_id|payment_id with key_secret). Returns False if no keys (can't verify)
-    or if verification fails — the router treats False as a rejected capture."""
+    or if verification fails — the router treats False as a rejected capture.
+
+    NOTE: a valid signature only proves the payment belongs to this order_id.
+    It does NOT prove the customer paid the right AMOUNT — Checkout.js sends
+    the amount from the browser, which a tampered client could lower. The
+    router must also call fetch_payment() and assert the amount. That second
+    check is the one that closes the real gap; this function is necessary but
+    not sufficient on its own.
+    """
     client = _get_client()
     if not client:
         return False
@@ -77,6 +86,20 @@ def verify_payment(razorpay_order_id: str, razorpay_payment_id: str, razorpay_si
         })
     except Exception:
         return False
+
+
+def fetch_payment(payment_id: str) -> dict | None:
+    """Fetch a payment's full record from Razorpay so the router can verify the
+    amount actually charged. Returns None on any failure (no keys, bad id, network)
+    — the router treats None as 'cannot confirm amount' and rejects the capture.
+    Never raises: this is a security check, so a failure must fail closed."""
+    client = _get_client()
+    if not client:
+        return None
+    try:
+        return client.payment.fetch(payment_id)
+    except Exception:
+        return None
 
 
 def release_payment(order_id: int, amount: float, fleet_name: str) -> dict:
@@ -93,6 +116,96 @@ def release_payment(order_id: int, amount: float, fleet_name: str) -> dict:
     Not attempted here — requires account setup this demo doesn't have. Mocked.
     """
     return {"razorpay_ref": f"mock_payout_{uuid.uuid4().hex[:8]}", "status": "released"}
+def _get_fund_account(fleet_name: str) -> str | None:
+    """Look up the RazorpayX fund_account_id for a fleet partner.
+
+    Configured via the FLEET_FUND_ACCOUNTS env var as a JSON map:
+      FLEET_FUND_ACCOUNTS={"Porter (Mumbai)":"fa_abc123","Borzo (Bengaluru)":"fa_def456"}
+
+    Matching is fuzzy: if the fleet_name contains a substring that's a key in
+    the map, we use that fund account. Returns None if no match or no env var.
+    """
+    raw = os.environ.get("FLEET_FUND_ACCOUNTS")
+    if not raw:
+        return None
+    try:
+        mapping = json.loads(raw)
+    except Exception:
+        return None
+    # Exact match first, then substring match (fleet names may have city suffixes)
+    if fleet_name in mapping:
+        return mapping[fleet_name]
+    for key, val in mapping.items():
+        if key in fleet_name or fleet_name in key:
+            return val
+    return None
+
+
+def release_payment(order_id: int, amount: float, fleet_name: str) -> dict:
+    """
+    Real RazorpayX Payout to the fleet partner on successful delivery.
+
+    Requires:
+      - RAZORPAY_X_ACCOUNT_NUMBER env var (your RazorpayX virtual account number)
+      - FLEET_FUND_ACCOUNTS env var (JSON map of fleet_name → fund_account_id)
+
+    Falls back to a mock ref if RazorpayX is not configured or the call fails.
+    The mock is clearly distinguishable (mock_payout_ prefix) so the frontend
+    can display "simulated" vs "real" payout status.
+    """
+    client = _get_client()
+    account_number = os.environ.get("RAZORPAY_X_ACCOUNT_NUMBER")
+    fund_account_id = _get_fund_account(fleet_name)
+
+    if not client or not account_number or not fund_account_id:
+        return {"razorpay_ref": f"mock_payout_{uuid.uuid4().hex[:8]}", "status": "released"}
+
+    try:
+        payout = client.payout.create({
+            "account_number": account_number,
+            "fund_account_id": fund_account_id,
+            "amount": int(amount * 100),
+            "currency": "INR",
+            "mode": "UPI",
+            "purpose": "payout",
+            "notes": {
+                "fleetagent_order_id": str(order_id),
+                "fleet_name": fleet_name,
+            },
+        })
+        return {"razorpay_ref": payout["id"], "status": payout["status"]}
+    except Exception:
+        return {"razorpay_ref": f"mock_payout_{uuid.uuid4().hex[:8]}", "status": "released"}
+
+
+def fetch_payout(payout_id: str) -> dict | None:
+    """Fetch a payout's status from RazorpayX. Used by the webhook handler
+    to confirm a payout moved to 'processed'. Returns None on any failure."""
+    client = _get_client()
+    if not client:
+        return None
+    try:
+        return client.payout.fetch(payout_id)
+    except Exception:
+        return None
+
+
+def verify_webhook_signature(payload_body: bytes, signature: str) -> bool:
+    """Verify a Razorpay webhook signature (HMAC-SHA256 of the raw request body
+    with the webhook secret). Returns False if no secret is configured or if
+    verification fails. Never raises — a security check must fail closed."""
+    import hashlib
+    import hmac
+    secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET")
+    if not secret:
+        return False
+    try:
+        expected = hmac.new(
+            secret.encode(), payload_body, hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(expected, signature)
+    except Exception:
+        return False
 
 
 def refund_payment(order_id: int, amount: float, payment_id: str | None = None) -> dict:
