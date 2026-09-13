@@ -102,20 +102,6 @@ def fetch_payment(payment_id: str) -> dict | None:
         return None
 
 
-def release_payment(order_id: int, amount: float, fleet_name: str) -> dict:
-    """
-    TODO once RazorpayX is enabled on your account:
-        client.payout.create({
-            "account_number": os.environ["RAZORPAY_X_ACCOUNT_NUMBER"],
-            "fund_account_id": <fleet's registered fund account>,
-            "amount": int(amount * 100),
-            "currency": "INR",
-            "mode": "UPI",
-            "purpose": "payout",
-        })
-    Not attempted here — requires account setup this demo doesn't have. Mocked.
-    """
-    return {"razorpay_ref": f"mock_payout_{uuid.uuid4().hex[:8]}", "status": "released"}
 def _get_fund_account(fleet_name: str) -> str | None:
     """Look up the RazorpayX fund_account_id for a fleet partner.
 
@@ -132,7 +118,6 @@ def _get_fund_account(fleet_name: str) -> str | None:
         mapping = json.loads(raw)
     except Exception:
         return None
-    # Exact match first, then substring match (fleet names may have city suffixes)
     if fleet_name in mapping:
         return mapping[fleet_name]
     for key, val in mapping.items():
