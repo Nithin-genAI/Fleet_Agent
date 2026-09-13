@@ -1,11 +1,11 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getOrder } from "../api";
 import { openCheckout, checkoutAvailable, TEST_CARD_HINT } from "../checkout";
 import Typewriter from "../components/Typewriter";
 import StepCard from "../components/StepCard";
 
-const STEP_DELAY = 800; // ms between step card reveals
+const STEP_DELAY = 1500; // ms between step card reveals — slower so users can read each step
 
 export default function AgentPage({ onUpdated }) {
   const { orderId } = useParams();
@@ -16,12 +16,14 @@ export default function AgentPage({ onUpdated }) {
   const [visibleSteps, setVisibleSteps] = useState(0);
   const [typingDone, setTypingDone] = useState({});
   const [payMsg, setPayMsg] = useState(null);
-  const fetchedRef = useRef(false);
 
-  // Fetch order once on mount
+  // Fetch order whenever orderId changes (handles navigation between orders)
   useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
+    setLoading(true);
+    setError(null);
+    setOrder(null);
+    setVisibleSteps(0);
+    setTypingDone({});
     getOrder(orderId)
       .then((data) => { setOrder(data); setLoading(false); })
       .catch((err) => { setError(err.message); setLoading(false); });
@@ -66,7 +68,7 @@ export default function AgentPage({ onUpdated }) {
     <tr key={i} className={q.fleet_name === order.selected_fleet ? "chosen" : ""}>
       <td>{q.fleet_name}</td>
       <td>₹{q.price}</td>
-      <td>{q.eta_hours}h</td>
+      <td>{q.eta_hours != null ? `${q.eta_hours}h` : "—"}</td>
       <td><span className={`cat cat-${q.category || "standard"}`}>{q.category === "quick" ? "same-day" : "long-haul"}</span></td>
       <td>{q.source}</td>
     </tr>
