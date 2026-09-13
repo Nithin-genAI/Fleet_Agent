@@ -1,32 +1,35 @@
 """
 AI fleet selection — the one place an LLM is used in this system.
 
-The agent picks the best fleet by reasoning about two primary factors:
-  1. COST efficiency — cheaper is better, weighted at 60%
-  2. TIME efficiency — faster ETA is better, weighted at 40%
+The agent is STATELESS and AUTONOMOUS: it receives the full set of live quotes
+and independently reasons about which fleet offers the best cost-time trade-off.
+No pre-computed scores are injected — the LLM derives its own assessment from
+the raw price and ETA data, which makes the selection genuinely agentic rather
+than a rubber-stamp on a formula.
 
-A composite score blends both: 0.6 × normalized_cost + 0.4 × normalized_ETA.
-The LLM receives this scoring rubric in its prompt so its reasoning is
-grounded in the same formula the fallback uses — not a vague "pick the best."
+SELECTION CRITERIA the agent considers:
+  1. COST efficiency — lower price is better (weighted ~60%)
+  2. TIME efficiency — lower ETA is better (weighted ~40%)
+  3. Category constraints — quick fleets can't serve inter-city routes
 
-Robustness: the Groq call is retried up to 3 times with exponential backoff
-(1s → 2s → 4s). Combined with JSON-mode responses and defensive parsing,
-the rule-based fallback should fire <1% of the time. When it does fire,
-it uses the SAME composite scoring — not just cheapest-wins.
+Robustness: the Groq call is retried up to 3 times with exponential backoff.
+If all retries are exhausted (or no API key), a rule-based composite-score
+fallback fires. The fallback uses the SAME cost+time logic — not just cheapest.
 """
 import os
 import json
 import time
+import re
 
 GROQ_MODEL = "openai/gpt-oss-20b"
 
-# Scoring weights — cost is the primary factor, time is secondary.
+# Scoring weights — used by the rule-based fallback only. The LLM derives
+# its own reasoning from the raw data, but when it fails we fall back to
+# this formula so the fallback is still intelligent, not just cheapest-wins.
 COST_WEIGHT = 0.6
 TIME_WEIGHT = 0.4
 
-# Retry config — this is what drives the fallback rate below 1%.
-# Backoff is tight (0.5s → 1s → 2s = 3.5s worst case) so a demo never
-# waits more than ~3.5s + one Groq call before getting a decision.
+# Retry config — backoff is tight (0.5s → 1s → 2s = 3.5s worst case).
 MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = [0.5, 1, 2]
 
@@ -42,10 +45,7 @@ def _normalize(values: list[float]) -> list[float]:
 
 
 def compute_scores(quotes: list[dict]) -> list[dict]:
-    """
-    Composite cost + time score for each quote.
-    Lower composite_score = better overall value.
-    """
+    """Composite cost + time score for each quote. Lower = better."""
     prices = [q["price"] for q in quotes]
     etas = [q.get("eta_hours") or 0 for q in quotes]
     norm_cost = _normalize(prices)
@@ -71,10 +71,7 @@ def _filter_candidates(quotes: list[dict], exclude: list[str], intra_city: bool)
 
 
 def rule_based_select(quotes: list[dict], exclude: list[str] | None = None, intra_city: bool = False) -> dict:
-    """
-    Fallback: composite-score winner (cost + time), not just cheapest.
-    Quick fleets are excluded for inter-city routes.
-    """
+    """Fallback: composite-score winner (cost + time), not just cheapest."""
     exclude = exclude or []
     candidates = _filter_candidates(quotes, exclude, intra_city)
     if not candidates:
@@ -86,17 +83,17 @@ def rule_based_select(quotes: list[dict], exclude: list[str] | None = None, intr
 def _value_assessment(package_value: float) -> str:
     """Dynamic guidance: high-value → weight time more, low-value → cost dominates."""
     if package_value >= 2000:
-        return f"HIGH-VALUE package (₹{package_value}) — time efficiency matters more; weigh speed higher."
+        return f"HIGH-VALUE package (Rs {package_value}) — time efficiency matters more; weigh speed higher."
     if package_value <= 200:
-        return f"LOW-VALUE package (₹{package_value}) — cost efficiency dominates; pick the cheapest viable option."
-    return f"MID-VALUE package (₹{package_value}) — balance cost and time evenly."
+        return f"LOW-VALUE package (Rs {package_value}) — cost efficiency dominates; pick the cheapest viable option."
+    return f"MID-VALUE package (Rs {package_value}) — balance cost and time evenly."
 
 
 def _build_prompt(quotes: list[dict], package_value: float, exclude: list[str], intra_city: bool) -> str:
-    """Build the Groq prompt with pre-computed scores so the LLM reasons
-    against the same data the fallback would use."""
+    """Build the Groq prompt with raw quote data — no pre-computed scores.
+    The LLM derives its own cost-time assessment, making the selection genuinely
+    autonomous rather than a rubber-stamp on a formula."""
     candidates = _filter_candidates(quotes, exclude, intra_city)
-    scored = compute_scores(candidates)
     route_type = (
         "intra-city (same city, same-day delivery)"
         if intra_city
@@ -104,49 +101,74 @@ def _build_prompt(quotes: list[dict], package_value: float, exclude: list[str], 
     )
     options_json = json.dumps([
         {
-            "fleet_name": s["fleet_name"],
-            "price": s["price"],
-            "eta_hours": s.get("eta_hours"),
-            "category": s.get("category", "standard"),
-            "cost_score": s["cost_score"],
-            "time_score": s["time_score"],
-            "composite_score": s["composite_score"],
+            "fleet_name": q["fleet_name"],
+            "price": q["price"],
+            "eta_hours": q.get("eta_hours"),
+            "category": q.get("category", "standard"),
+            "source": q.get("source", "unknown"),
         }
-        for s in scored
-    ], indent=2)
+        for q in candidates
+    ])
 
     return (
-        "You are a logistics dispatch agent. Select the best delivery fleet for a "
-        "package worth ₹{value} on an {route} shipment.\n\n"
-        "SELECTION CRITERIA (priority order):\n"
-        "  1. COST efficiency (weight {cost_w}): lower price is better. cost_score 0.0 = cheapest.\n"
-        "  2. TIME efficiency (weight {time_w}): lower ETA is better. time_score 0.0 = fastest.\n"
-        "  3. Composite = {cost_w}×cost_score + {time_w}×time_score. LOWER composite = better.\n\n"
-        "VALUE ASSESSMENT: {value_note}\n\n"
-        "ROUTE RULES:\n"
-        "  - 'quick' fleets (intra-city same-day) CANNOT serve inter-city routes — never pick one for inter-city.\n"
-        "  - For intra-city, a 'quick' fleet is usually right (faster, competitive cost).\n\n"
-        "OPTIONS (pre-scored):\n{options}\n\n"
-        "Reason step-by-step: compare cost vs time for each viable option, note the composite scores, "
-        "then pick the fleet with the best cost-time balance. "
-        "Respond ONLY with JSON:\n"
-        '{{"fleet_name": "...", "cost_reasoning": "one sentence on why this is cost-efficient", '
-        '"time_reasoning": "one sentence on why the ETA is acceptable or superior", '
-        '"reasoning": "one sentence: the overall cost + time trade-off that justifies this pick"}}'
-    ).format(
-        value=package_value,
-        route=route_type,
-        cost_w=COST_WEIGHT,
-        time_w=TIME_WEIGHT,
-        value_note=_value_assessment(package_value),
-        options=options_json,
+        f"Select the best delivery fleet for a {route_type} shipment worth Rs {package_value}.\n\n"
+        f"SELECTION CRITERIA (priority order):\n"
+        f"  1. COST efficiency (weight 0.6): lower price is better.\n"
+        f"  2. TIME efficiency (weight 0.4): lower ETA is better.\n"
+        f"  3. Composite = 0.6 x cost_score + 0.4 x time_score. LOWER = better.\n\n"
+        f"VALUE ASSESSMENT: {_value_assessment(package_value)}\n\n"
+        f"ROUTE RULES:\n"
+        f"  - 'quick' fleets (intra-city same-day) CANNOT serve inter-city routes.\n"
+        f"  - For intra-city, a 'quick' fleet is usually right (faster, competitive cost).\n"
+        f"  - Always prefer a fleet that is BOTH cheaper AND faster when one exists.\n\n"
+        f"OPTIONS (live quotes):\n{options_json}\n\n"
+        f"Reason step-by-step: compare cost vs time for each viable option, "
+        f"identify which fleet is both cheapest and fastest if one exists, "
+        f"then pick the fleet with the best cost-time balance. "
+        f"Respond ONLY with JSON:\n"
+        f'{{"fleet_name": "exact fleet name from options", '
+        f'"cost_reasoning": "one sentence on why this is cost-efficient", '
+        f'"time_reasoning": "one sentence on why the ETA is acceptable or superior", '
+        f'"reasoning": "one sentence: the overall cost + time trade-off that justifies this pick"}}'
     )
+
+
+def _extract_json(content: str) -> dict | None:
+    """Extract a JSON object from a text response, handling cases where the
+    LLM wraps JSON in markdown code blocks or adds extra text."""
+    # Try direct parse first
+    try:
+        return json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Try extracting from markdown code block
+    m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Try extracting the first {...} block
+    m = re.search(r'\{.*\}', content, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    return None
 
 
 def _groq_select(quotes: list[dict], package_value: float, exclude: list[str], intra_city: bool) -> dict | None:
     """
     Call Groq with retry + exponential backoff. Returns decision dict or None
     if all retries are exhausted (→ caller falls back to rule-based).
+
+    Uses a two-phase approach:
+      1. Try with JSON mode (structured output) first.
+      2. If JSON mode fails, retry without JSON mode and extract JSON manually.
     """
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
@@ -163,18 +185,46 @@ def _groq_select(quotes: list[dict], package_value: float, exclude: list[str], i
         return None
 
     prompt = _build_prompt(quotes, package_value, exclude, intra_city)
+    system_msg = (
+        "You are a logistics dispatch agent. You select the best delivery fleet "
+        "by independently reasoning about cost and time efficiency. "
+        "You always respond with valid JSON only."
+    )
 
     for attempt in range(MAX_RETRIES):
         try:
-            resp = client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                max_tokens=350,
-                response_format={"type": "json_object"},
-            )
+            # Phase 1: Try with JSON mode (attempts 0 and 1)
+            # Phase 2: Try without JSON mode and extract manually (attempt 2)
+            if attempt < 2:
+                resp = client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=800,
+                    response_format={"type": "json_object"},
+                )
+            else:
+                # Last attempt: no JSON mode, extract manually
+                resp = client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=800,
+                )
+
             content = resp.choices[0].message.content
-            parsed = json.loads(content)
+            if not content or not content.strip():
+                raise ValueError("Empty response from model")
+
+            parsed = _extract_json(content)
+            if not parsed:
+                raise ValueError("Could not extract JSON from response")
 
             # Validate fleet name is a real candidate (not hallucinated)
             match = next(
@@ -199,24 +249,16 @@ def _groq_select(quotes: list[dict], package_value: float, exclude: list[str], i
                 parts.append(summary)
             reasoning = " | ".join(parts)
 
-            # Attach composite score
-            scored = compute_scores(candidates)
-            chosen = next(
-                (s for s in scored if s["fleet_name"] == match["fleet_name"]),
-                match,
-            )
-
             return {
                 **match,
                 "reasoning": reasoning,
-                "composite_score": chosen.get("composite_score"),
             }
 
         except Exception:
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_BACKOFF_SECONDS[attempt])
                 continue
-            return None  # all retries exhausted
+            return None
 
 
 def select_fleet(
@@ -226,7 +268,7 @@ def select_fleet(
     intra_city: bool = False,
 ) -> dict:
     """
-    Returns {"fleet_name", "price", "eta_hours", "reasoning", "composite_score"}.
+    Returns {"fleet_name", "price", "eta_hours", "reasoning"}.
     Tries Groq (3 retries with backoff) → falls back to composite-score rule.
     The fallback uses the SAME cost+time scoring, not just cheapest-wins.
     """
@@ -242,7 +284,7 @@ def select_fleet(
         {},
     )
     reasoning = (
-        f"[Rule-based fallback] {choice['fleet_name']} at ₹{choice['price']} — "
+        f"[Rule-based fallback] {choice['fleet_name']} at Rs {choice['price']} — "
         f"composite {chosen.get('composite_score', 'N/A')} "
         f"(cost {chosen.get('cost_score', 'N/A')}, time {chosen.get('time_score', 'N/A')}). "
         f"Best cost+time balance among {len(scored)} eligible options."
@@ -250,7 +292,6 @@ def select_fleet(
     return {
         **choice,
         "reasoning": reasoning,
-        "composite_score": chosen.get("composite_score"),
     }
 
 
@@ -260,5 +301,5 @@ def reroute_after_rto(
     package_value: float,
     intra_city: bool = False,
 ) -> dict:
-    """Same selection logic, excluding the fleet that just failed."""
+    """Same selection logic, excluding the fleet(s) that just failed."""
     return select_fleet(quotes, package_value, exclude=[failed_fleet], intra_city=intra_city)
