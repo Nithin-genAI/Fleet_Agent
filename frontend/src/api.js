@@ -49,6 +49,16 @@ export async function capturePayment(orderId, { razorpay_order_id, razorpay_paym
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ razorpay_order_id, razorpay_payment_id, razorpay_signature }),
   });
-  if (!res.ok) throw new Error("Failed to capture payment");
+  if (!res.ok) {
+    // Parse the backend's specific error message so the user knows WHY
+    // capture failed (e.g. "Order is in status 'completed'" or "Payment
+    // already captured") instead of a generic "Failed to capture payment".
+    let detail = "Failed to capture payment";
+    try {
+      const body = await res.json();
+      if (body.detail) detail = body.detail;
+    } catch {}
+    throw new Error(detail);
+  }
   return res.json();
 }

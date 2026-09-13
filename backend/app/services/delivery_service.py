@@ -69,6 +69,13 @@ def handle_rto(order: models.Order, db: Session) -> models.Order:
         status=refund["status"],
     ))
 
+    # Clear the stale payment_id — the refund has consumed it. The new hold
+    # for the rerouted fleet needs a fresh Checkout payment, and leaving the
+    # old payment_id set would make the frontend think the order is already
+    # paid (hiding the checkout button) and the backend would reject any new
+    # capture with "Payment already captured for this order".
+    order.razorpay_payment_id = None
+
     failed_fleet = order.selected_fleet
 
     # 2. Retry cap check

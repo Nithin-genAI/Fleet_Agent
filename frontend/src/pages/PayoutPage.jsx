@@ -57,6 +57,7 @@ export default function PayoutPage({ onUpdated }) {
 
   const canSimulate = order.status === "booked";
   const needsPayment = canSimulate && !order.razorpay_payment_id && checkoutAvailable(order);
+  const isTerminal = order.status === "completed" || order.status === "failed";
   const isCompleted = order.status === "completed";
   const releaseTxn = order.transactions?.find((t) => t.type === "release");
   const isMockPayout = releaseTxn && releaseTxn.razorpay_ref?.startsWith("mock_");

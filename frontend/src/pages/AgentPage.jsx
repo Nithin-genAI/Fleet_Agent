@@ -60,7 +60,8 @@ export default function AgentPage({ onUpdated }) {
 
   const holdTxn = order.transactions?.find((t) => t.type === "hold");
   const isPaid = !!order.razorpay_payment_id;
-  const canCheckout = checkoutAvailable(order) && !isPaid;
+  const isTerminal = order.status === "completed" || order.status === "failed";
+  const canCheckout = checkoutAvailable(order) && !isPaid && !isTerminal;
   const route = `${order.origin_pincode} → ${order.destination_pincode}`;
 
   // Build the quote table rows
@@ -154,11 +155,11 @@ export default function AgentPage({ onUpdated }) {
         </StepCard>
       )}
 
-      {/* Proceed to delivery */}
+      {/* Proceed to delivery (or view outcome for terminal orders) */}
       {visibleSteps >= 3 && (isPaid || !canCheckout) && (
         <div className="agent-actions">
           <button className="btn btn-primary btn-lg" onClick={() => navigate(`/payout/${order.id}`)}>
-            Proceed to Delivery →
+            {isTerminal ? "View Delivery & Payout →" : "Proceed to Delivery →"}
           </button>
         </div>
       )}
